@@ -579,7 +579,7 @@ if st.button("Generuj raport Word"):
             run_label = para.add_run("Zakres testu:")
             run_label.bold = True
             for line in [l.strip() for l in tested_scope.splitlines() if l.strip()]:
-                doc.add_paragraph(f"- {line}")
+                doc.add_paragraph(line)
         doc.add_paragraph("")
         from docx.shared import Inches, Cm
         table = doc.add_table(rows=1, cols=5)
@@ -717,109 +717,3 @@ if st.session_state.get('report_ready') and st.session_state.get('report_filenam
         st.error(f"Błąd podczas generowania rekomendacji: {e}")
         st.code(tb)
 
-    # Dodajemy do dokumentu osobne sekcje dla każdej wytycznej (nagłówek + status + uwagi + screenshoty + rekomendacja)
-    # Sekcja rekomendacji (po tabeli)
-    doc.add_heading("Rekomendacje AI dla niespełnionych kryteriów", level=2)
-    for crit in wcag_criteria:
-        cid = crit["id"]
-        rec = None
-        if isinstance(recs, dict):
-            rec = recs.get(cid) or recs.get("_combined")
-        else:
-            rec = None
-        if rec:
-            doc.add_heading(f"{cid} - {crit['description']}", level=3)
-            doc.add_paragraph("Rekomendacja:")
-            # Formatowanie: każdy punkt/myślnik/liczba od nowej linii
-            lines = []
-            for l in str(rec).splitlines():
-                l = l.strip()
-                if l:
-                    # Rozbij na podpunkty jeśli są
-                    if l.startswith("-") or l.startswith("•") or l[:2].isdigit():
-                        for sub in l.split("- "):
-                            sub = sub.strip()
-                            if sub:
-                                doc.add_paragraph(sub)
-                    else:
-                        doc.add_paragraph(l)
-
-    # Zapis dokumentu
-    # Przygotuj przyjazną nazwę pliku bazującą na nazwie aplikacji (jeśli podana)
-    def _slugify(name: str) -> str:
-        # proste slugify: usuń niealfanumeryczne, zamień spacje na podkreślenia
-        import re
-        s = name.strip().lower()
-        s = re.sub(r"[^a-z0-9]+", "_", s)
-        s = re.sub(r"_+", "_", s).strip("_")
-        return s or "report"
-
-    date_str = datetime.today().strftime('%Y-%m-%d')
-    if app_name:
-        safe = _slugify(app_name)
-        filename = f"Raport_WCAG_{safe}_{date_str}.docx"
-    else:
-        filename = f"Raport_WCAG_{date_str}.docx"
-    doc.save(filename)
-    # pokaż informację w UI i udostępnij rzeczywisty plik do pobrania
-    try:
-        filesize = None
-        with open(filename, "rb") as f:
-            data = f.read()
-            filesize = len(data)
-            st.download_button("Pobierz raport", data=data, file_name=filename, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-        st.success(f"Raport wygenerowany: {filename} ({filesize} bajtów)")
-    except Exception as e:
-        st.error(f"Utworzono plik, ale nie udało się przygotować przycisku pobierania: {e}")
-
-    # cleanup temp image files
-    try:
-        for tf in temp_files:
-            if os.path.exists(tf):
-                os.unlink(tf)
-    except Exception:
-        pass
-
-    # Zapisz metadane do Excela
-    meta = {
-        "Data audytu": audit_date.strftime('%Y-%m-%d'),
-        "Data audytu (czytelna)": formatted,
-        "Autor audytu": audit_author,
-        "Wersja dokumentu": doc_version,
-        "Nazwa aplikacji / dokumentu": app_name,
-        "Typ audytowanego dokumentu": doc_type,
-        "Wersja przeglądarki": browser_version,
-        "Zakres testu": tested_scope.replace('\n', ', ')
-    }
-
-    import pandas as pd
-    meta_df = pd.DataFrame([meta])
-    xlsx_name = filename.replace('.docx', '.xlsx')
-    meta_df.to_excel(xlsx_name, index=False)
-    try:
-        with open(xlsx_name, "rb") as f:
-            st.download_button("Pobierz metadane (Excel)", data=f.read(), file_name=xlsx_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        st.success(f"Metadane zapisane: {xlsx_name}")
-        # Zapisz szkic automatycznie po pobraniu metadanych
-        def save_draft():
-            draft_dir = os.path.join(os.getcwd(), "szkice")
-            os.makedirs(draft_dir, exist_ok=True)
-            draft_data = {
-                "doc_type": doc_type,
-                "doc_version": doc_version,
-                "audit_author": audit_author,
-                "browser_version": browser_version,
-                "app_name": app_name,
-                "tested_scope": tested_scope,
-                "audit_date": audit_date.isoformat(),
-                "responses": responses,
-                "notes": notes
-            }
-            safe = app_name.strip().lower().replace(" ", "_") or "szkic"
-            draft_name = f"{safe}_{date_str}.json"
-            draft_path = os.path.join(draft_dir, draft_name)
-            with open(draft_path, "w", encoding="utf-8") as df:
-                json.dump(draft_data, df, ensure_ascii=False, indent=2)
-        save_draft()
-    except Exception as e:
-        st.error(f"Utworzono plik Excel, ale nie udało się przygotować przycisku pobierania: {e}")
