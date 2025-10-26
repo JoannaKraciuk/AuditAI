@@ -1,8 +1,8 @@
-# Prototyp agenta WCAG
+# AudytAI
 
-Krótko: prosta aplikacja Streamlit generująca raporty WCAG w formacie Word.
+Prosta aplikacja Streamlit do generowania raportów WCAG w formacie Word i Excel, z automatycznym zapisem szkiców, obsługą rekomendacji AI (OpenAI), jasnym motywem i wysokim kontrastem zgodnym z WCAG.
 
-Uruchomienie (PowerShell):
+## Uruchomienie (PowerShell)
 
 ```powershell
 .\venv\Scripts\Activate.ps1
@@ -11,18 +11,19 @@ setx OPENAI_API_KEY "<twój_klucz>"            # lub ustaw w bieżącej sesji: $
 streamlit run app.py
 ```
 
-Uwaga: jeżeli nie ustawisz `OPENAI_API_KEY`, aplikacja wygeneruje raport bez sekcji rekomendacji lub doda informację, że klucz nie jest ustawiony.
+## Funkcje
 
-Model:
+- Generowanie raportów WCAG (Word, Excel)
+- Automatyczny zapis i ładowanie szkiców audytu
+- Rekomendacje AI (OpenAI, tryb MOCK domyślny)
+- Jasny motyw, kontrastowe kolory statusów
+- Bezpieczne repozytorium: dane, szkice i raporty ukryte przez `.gitignore`
 
-- W UI dostępny jest selector modelu. Domyślnie wybrany jest `gpt-3.5-turbo` (najtańsza opcja).
+## Bezpieczeństwo
 
-.env i konfiguracja:
+- Plik `.gitignore` ukrywa szkice, pliki raportów, dane i klucze API
+- Nie commituj pliku `.env` ani folderu `szkice/`
 
-- Skopiuj `.env.example` do `.env` i uzupełnij `OPENAI_API_KEY` (nie commituj `.env`).
-- Aplikacja automatycznie załaduje zmienne z `.env` przy starcie (używa `python-dotenv`).
+## Repozytorium
 
-Nowe pola raportu:
-
-- `Nazwa aplikacji / dokumentu` — wpisz nazwę, pojawi się w nagłówku raportu i w nazwie pliku wynikowego.
-- `Zakres testu` — lista stron/sekcji/działań testowych; każdy wiersz zostanie wypisany w raporcie jako punkt.
+[github.com/JoannaKraciuk/AudytAI](https://github.com/JoannaKraciuk/AudytAI)
