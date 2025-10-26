@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+*.sqlite3
+*.db
+*.bak
+*.tmp
+*.swp
+*.swo
+*.env
+venv/
+.env
+
+# Streamlit
+.streamlit/
+
+# Word/Excel reports
+Raport_WCAG*.docx
+Raport_WCAG*.xlsx
+
+# Drafts and uploads
+szkice/
+uploads/
+
+# System
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
