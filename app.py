@@ -343,7 +343,7 @@ wcag_templates = {
     ],
 }
 
-st.title("Prototyp agenta raportu WCAG")
+st.title("AudytAI - Kreator raportów dostępności WCAG 2.1")
 
 
 # Pola metadanych raportu
@@ -387,11 +387,12 @@ if st.button("Wczytaj szkic") and selected_draft != "(brak)":
     except Exception as e:
         st.error(f"Błąd podczas wczytywania szkicu: {e}")
 
-# Typ dokumentu — użyjemy key, żeby można było załadować szkic przez session_state
 doc_type = st.selectbox("Wybierz typ pliku lub strony", ["Dokument Word", "PDF", "Strona WWW"], key='doc_type')
 doc_version = st.text_input("Wersja dokumentu", value="", key='doc_version')
 audit_author = st.text_input("Autor audytu", value="", key='audit_author')
 browser_version = st.text_input("Wersja przeglądarki", value="", help="Np. Chrome 124.0.6367.61, Firefox 125.0.1", key='browser_version')
+# Nowe pole: Narzędzia
+tools_used = st.text_input("Narzędzia użyte w audycie", value="", help="Np. Wave, axe, NVDA, JAWS, Lighthouse", key='tools_used')
 import locale
 # Spróbuj kilku wariantów polskiej lokalizacji (Linux/macOS i Windows)
 for loc in ("pl_PL.UTF-8", "pl_PL", "Polish_Poland.1250"):
@@ -408,6 +409,13 @@ polish_months = [
     "styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec",
     "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"
 ]
+# Ustaw domyślne wartości pickerów na dzisiejszą datę, jeśli nie są już ustawione (np. po wczytaniu szkicu)
+if 'year_picker' not in st.session_state:
+    st.session_state['year_picker'] = today.year
+if 'month_picker' not in st.session_state:
+    st.session_state['month_picker'] = polish_months[today.month - 1]
+if 'day_picker' not in st.session_state:
+    st.session_state['day_picker'] = today.day
 # Zakres lat: od -5 do +5 względem bieżącego roku
 years = list(range(today.year - 5, today.year + 6))
 selected_year = col_year.selectbox("Rok", years, key="year_picker")
@@ -424,19 +432,17 @@ except Exception:
     # Bezpieczny fallback na dziś
     audit_date = datetime.today()
 
-# Pokaż wybraną datę sformatowaną po polsku przy użyciu Babel (jeśli dostępny)
-try:
-    from babel.dates import format_date
-    try:
-        # format: '26 października 2025'
-        formatted = format_date(audit_date, format="d MMMM yyyy", locale="pl")
-    except Exception:
-        # fallback na lokalne formatowanie (może być po angielsku jeśli locale nie ustawione)
-        formatted = audit_date.strftime("%d %B %Y")
-    st.markdown(f"**Wybrana data audytu:** {formatted}")
-except ImportError:
-    # Jeśli Babel nie jest zainstalowany, ustaw fallback na lokalne formatowanie
-    formatted = audit_date.strftime("%d %B %Y")
+
+# Ręczne formatowanie polskiej daty (odmienione miesiące)
+polish_months_gen = [
+    "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+    "lipca", "sierpnia", "września", "października", "listopada", "grudnia"
+]
+def format_polish_date(dt):
+    return f"{dt.day} {polish_months_gen[dt.month-1]} {dt.year}"
+
+formatted = format_polish_date(audit_date)
+st.markdown(f"**Wybrana data audytu:** {formatted}")
 
 # ustaw kryteria na podstawie wybranego typu dokumentu
 wcag_criteria = wcag_templates.get(doc_type, wcag_templates["Dokument Word"]) 
@@ -524,6 +530,11 @@ for crit in wcag_criteria:
         )
 import pandas as pd
 
+if 'report_ready' not in st.session_state:
+    st.session_state['report_ready'] = False
+if 'report_filename' not in st.session_state:
+    st.session_state['report_filename'] = None
+
 if st.button("Generuj raport Word"):
     # Walidacja: wymagalność notatki dla niespełnionych kryteriów
     missing_notes = []
@@ -532,72 +543,149 @@ if st.button("Generuj raport Word"):
             missing_notes.append(crit["id"])
     if missing_notes:
         st.warning(f"Dla wytycznych oznaczonych jako niespełnione wymagane jest uzupełnienie notatki: {', '.join(missing_notes)}")
-        st.stop()
-
-    doc = Document()
-    doc.add_heading("Raport audytu WCAG", level=1)
-    doc.add_paragraph(f"Data audytu: {audit_date.strftime('%Y-%m-%d')}")
-    # Dodaj czytelną, sformatowaną datę (np. '26 października 2025') — użyjemy zmiennej `formatted` z Babel lub fallbacku
-    try:
-        doc.add_paragraph(f"Data audytu (czytelna): {formatted}")
-    except Exception:
-        # Jeśli z jakiegoś powodu `formatted` nie istnieje, zapisz tylko ISO
-        pass
-    if audit_author:
-        doc.add_paragraph(f"Autor audytu: {audit_author}")
-    if doc_version:
-        doc.add_paragraph(f"Wersja dokumentu: {doc_version}")
-    if app_name:
-        doc.add_paragraph(f"Nazwa aplikacji / dokumentu: {app_name}")
-    doc.add_paragraph(f"Typ audytowanego dokumentu: {doc_type}")
-    if browser_version:
-        doc.add_paragraph(f"Wersja przeglądarki: {browser_version}")
-    if tested_scope:
-        doc.add_paragraph("Zakres testu:")
-        for line in [l.strip() for l in tested_scope.splitlines() if l.strip()]:
-            doc.add_paragraph(f"- {line}")
-    doc.add_paragraph("")
-    # Profesjonalna tabela z wytycznymi
-    table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'ID'
-    hdr_cells[1].text = 'Nazwa wytycznej'
-    hdr_cells[2].text = 'Status'
-    hdr_cells[3].text = 'Notatka'
-    hdr_cells[4].text = 'Screenshoty'
-
-    for crit in wcag_criteria:
-        row_cells = table.add_row().cells
-        row_cells[0].text = crit["id"]
-        row_cells[1].text = crit["description"]
-        row_cells[2].text = responses[crit["id"]]
-        row_cells[3].text = notes.get(crit["id"], "")
-        # Wstaw screenshoty jako obrazy w komórce tabeli
-        imgs = uploads.get(crit["id"]) or []
-        if imgs:
-            from docx.shared import Inches
-            temp_files = [] if 'temp_files' not in locals() else temp_files
-            for up in imgs:
-                try:
-                    suffix = os.path.splitext(up.name)[1] if hasattr(up, "name") else ".png"
-                    tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                    tf.write(up.getbuffer())
-                    tf.close()
-                    temp_files.append(tf.name)
-                    # Wstaw obraz do komórki
-                    paragraph = row_cells[4].add_paragraph()
-                    run = paragraph.add_run()
-                    run.add_picture(tf.name, width=Inches(1.5))
-                except Exception:
-                    row_cells[4].add_paragraph(f"(Błąd przy dodawaniu obrazka {up.name})")
+    else:
+        doc = Document()
+        # Wyśrodkowany tytuł jako nagłówek (Heading 1), bez nawiasów kwadratowych
+        if app_name:
+            title = f"Raport z audytu WCAG {app_name}"
         else:
-            row_cells[4].text = ""
+            title = "Raport z audytu WCAG"
+        # Tytuł jako zwykły paragraf, wyśrodkowany, pogrubiony, powiększony
+        p = doc.add_paragraph()
+        run = p.add_run(title)
+        run.bold = True
+        run.font.size = doc.styles['Heading 1'].font.size
+        p.alignment = 1  # 0=left, 1=center, 2=right
+        # Dodaj odstęp po tytule
+        doc.add_paragraph("")
+        # Wyboldowane metadane
+        meta_items = [
+            ("Data audytu", formatted),
+            ("Autor audytu", audit_author),
+            ("Wersja dokumentu", doc_version),
+            ("Nazwa aplikacji / dokumentu", app_name),
+            ("Typ audytowanego dokumentu", doc_type),
+            ("Wersja przeglądarki", browser_version),
+            ("Narzędzia użyte w audycie", tools_used)
+        ]
+        for label, value in meta_items:
+            if value:
+                para = doc.add_paragraph()
+                run_label = para.add_run(f"{label}: ")
+                run_label.bold = True
+                para.add_run(str(value))
+        if tested_scope:
+            para = doc.add_paragraph()
+            run_label = para.add_run("Zakres testu:")
+            run_label.bold = True
+            for line in [l.strip() for l in tested_scope.splitlines() if l.strip()]:
+                doc.add_paragraph(f"- {line}")
+        doc.add_paragraph("")
+        from docx.shared import Inches, Cm
+        table = doc.add_table(rows=1, cols=5)
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        headers = ['ID', 'Nazwa wytycznej', 'Status', 'Uwagi', 'Załączniki']
+        for i, h in enumerate(headers):
+            hdr_cells[i].text = h
+            for paragraph in hdr_cells[i].paragraphs:
+                for run in paragraph.runs:
+                    run.bold = True
+        # Wymuś minimalną szerokość kolumny ID (1 cm) na wszystkich komórkach tej kolumny
+        try:
+            for row in table.rows:
+                cell = row.cells[0]
+                cell.width = Cm(1)
+        except Exception:
+            pass
+        for crit in wcag_criteria:
+            row_cells = table.add_row().cells
+            row_cells[0].text = crit["id"]
+            row_cells[1].text = crit["description"]
+            row_cells[2].text = responses[crit["id"]]
+            row_cells[3].text = notes.get(crit["id"], "")
+            imgs = uploads.get(crit["id"]) or []
+            if imgs:
+                temp_files = [] if 'temp_files' not in locals() else temp_files
+                for up in imgs:
+                    try:
+                        suffix = os.path.splitext(up.name)[1] if hasattr(up, "name") else ".png"
+                        tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                        tf.write(up.getbuffer())
+                        tf.close()
+                        temp_files.append(tf.name)
+                        paragraph = row_cells[4].add_paragraph()
+                        run = paragraph.add_run()
+                        run.add_picture(tf.name, width=Inches(1.5))
+                    except Exception:
+                        row_cells[4].add_paragraph(f"(Błąd przy dodawaniu obrazka {up.name})")
+            else:
+                row_cells[4].text = ""
+        # Po utworzeniu całej tabeli wymuś szerokość kolumny ID na 0.8 cm
+        # Ustal szerokości wszystkich kolumn dla estetyki
+        try:
+            for row in table.rows:
+                row.cells[0].width = Cm(1)   # ID
+                row.cells[1].width = Cm(4)   # Nazwa wytycznej
+                row.cells[2].width = Cm(4)   # Status (poszerzona)
+                row.cells[3].width = Cm(4.5) # 
+                row.cells[4].width = Cm(3)   # Załączniki
+        except Exception:
+            pass
+        # Dodaj sekcję rekomendacji na końcu
+        doc.add_page_break()
+        doc.add_heading("Rekomendacje AI dla niespełnionych kryteriów", level=2)
+        # Jeśli są rekomendacje, dodaj je
+        if 'recs' in locals() and recs:
+            for crit in wcag_criteria:
+                cid = crit["id"]
+                rec = None
+                if isinstance(recs, dict):
+                    rec = recs.get(cid) or recs.get("_combined")
+                else:
+                    rec = None
+                if rec:
+                    doc.add_heading(f"{cid} - {crit['description']}", level=3)
+                    doc.add_paragraph("Rekomendacja:")
+                    for l in str(rec).splitlines():
+                        l = l.strip()
+                        if l:
+                            if l.startswith("-") or l.startswith("•") or l[:2].isdigit():
+                                for sub in l.split("- "):
+                                    sub = sub.strip()
+                                    if sub:
+                                        doc.add_paragraph(sub)
+                            else:
+                                doc.add_paragraph(l)
+        # ... rekomendacje AI i dalsza logika ...
+        # Zapis dokumentu
+        def _slugify(name: str) -> str:
+            import re
+            s = name.strip().lower()
+            s = re.sub(r"[^a-z0-9]+", "_", s)
+            s = re.sub(r"_+", "_", s).strip("_")
+            return s or "report"
+        date_str = datetime.today().strftime('%Y-%m-%d')
+        if app_name:
+            safe = _slugify(app_name)
+            filename = f"Raport_WCAG_{safe}_{date_str}.docx"
+        else:
+            filename = f"Raport_WCAG_{date_str}.docx"
+        doc.save(filename)
+        st.session_state['report_ready'] = True
+        st.session_state['report_filename'] = filename
 
-    # Generowanie rekomendacji przy użyciu OpenAI (jeśli dostępny klucz)
-    recs = {}
-    temp_files = []
+# Przycisk pobierania raportu zawsze widoczny, jeśli raport został wygenerowany
+if st.session_state.get('report_ready') and st.session_state.get('report_filename'):
     try:
+        filesize = None
+        with open(st.session_state['report_filename'], "rb") as f:
+            data = f.read()
+            filesize = len(data)
+            st.download_button("Pobierz raport", data=data, file_name=st.session_state['report_filename'], mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        st.success(f"Raport wygenerowany: {st.session_state['report_filename']} ({filesize} bajtów)")
+    except Exception as e:
+        st.error(f"Utworzono plik, ale nie udało się przygotować przycisku pobierania: {e}")
         api_key = os.getenv("OPENAI_API_KEY")
         # Build notes_for_ai: include notes and indication of screenshots
         notes_for_ai = {}
