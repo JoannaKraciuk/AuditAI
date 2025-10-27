@@ -343,7 +343,7 @@ wcag_templates = {
     ],
 }
 
-st.title("AudytAI - Kreator raportów dostępności WCAG 2.1")
+st.title("AuditAI - Kreator raportów dostępności WCAG 2.1")
 
 
 # Pola metadanych raportu
@@ -796,9 +796,9 @@ if st.button("Generuj raport Word"):
         date_str = datetime.today().strftime('%Y-%m-%d')
         if app_name:
             safe = _slugify(app_name)
-            filename = f"Raport_WCAG_{safe}_{date_str}.docx"
+            filename = f"AuditAI_WCAG_{safe}_{date_str}.docx"
         else:
-            filename = f"Raport_WCAG_{date_str}.docx"
+            filename = f"AuditAI_WCAG_{date_str}.docx"
         doc.save(filename)
         st.session_state['report_ready'] = True
         st.session_state['report_filename'] = filename
