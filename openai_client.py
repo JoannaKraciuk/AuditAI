@@ -44,8 +44,17 @@ def generate_recommendations(responses: dict, notes: dict | None = None, model: 
 
     # Build structured prompt asking for JSON output: {"1.1.1": "...", ...}
     prompt_lines = [
-        "Masz za zadanie wygenerować praktyczne rekomendacje naprawcze dla następujących kryteriów WCAG.",
-        "Dla każdego kryterium zwróć krótką rekomendację (1-3 kroki) w formacie JSON, gdzie klucz to identyfikator kryterium, a wartość to tekst rekomendacji.",
+        "Jesteś ekspertem od dostępności cyfrowej (WCAG). Dla każdego niespełnionego kryterium WCAG wygeneruj rekomendację w formie czystego tekstu, bez grafik, wideo ani innych mediów.",
+        "Każda rekomendacja powinna być opisowa (2–4 zdania, krótki akapit):",
+        "- wyjaśnij na czym polega problem, dlaczego jest istotny dla dostępności, jaki ma wpływ na użytkowników (np. osoby z niepełnosprawnościami)",
+        "- podaj techniczne zalecenie jak naprawić problem (zwięźle, konkretnie)",
+        "- jeśli ma sens, dodaj przykładowy fragment kodu (HTML, CSS, JS) — tylko jeśli jest potrzebny, nie wymuszaj pustych pól",
+        "- dodaj źródło: link do odpowiedniego dokumentu WCAG (np. https://www.w3.org/WAI/WCAG21/Understanding/1.1.1.html)",
+        "Format odpowiedzi (JSON, bez dodatkowego opisu):",
+        "'1.1.1': { 'naprawa': 'Dodaj tekst alternatywny do wszystkich obrazów. Tekst alternatywny umożliwia osobom korzystającym z czytników ekranu zrozumienie treści wizualnej. Brak opisu powoduje, że użytkownicy niewidomi nie wiedzą, co przedstawia obraz.', 'kod': '<img src=\"produkt.jpg\" alt=\"Zdjęcie produktu – czerwony kubek ceramiczny\">', 'w3c_link': 'https://www.w3.org/WAI/WCAG21/Understanding/1.1.1.html' }",
+        "Nie dodawaj żadnych plików, grafik, screenów, miniaturek, osadzonych filmów ani znaczników multimedialnych.",
+        "Zabronione elementy: <video>, <source>, <img>, <iframe>, <audio>, <embed>, linki do wideo (YouTube, Vimeo, MP4 itp.), komunikaty typu 'Nieobsługiwany format wideo', 'Nie można odtworzyć wideo', 'Brak podglądu'.",
+        "Nie używaj pustych pól ani dodatkowych linii. Styl: profesjonalny, spójny, raportowy (jak audyt dostępności).",
         "",
     ]
     for cid in failed:

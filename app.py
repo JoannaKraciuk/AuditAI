@@ -358,6 +358,7 @@ if st.button("Wczytaj szkic") and selected_draft != "(brak)":
         with open(os.path.join(draft_dir, selected_draft), 'r', encoding='utf-8') as df:
             data = json.load(df)
         # Ustaw wartości w session_state przed renderowaniem widgetów
+        # Ustaw wartości w session_state
         st.session_state['doc_type'] = data.get('doc_type', st.session_state.get('doc_type', 'Dokument Word'))
         st.session_state['doc_version'] = data.get('doc_version', '')
         st.session_state['audit_author'] = data.get('audit_author', '')
@@ -408,22 +409,40 @@ polish_months = [
     "styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec",
     "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"
 ]
-# Ustaw domyślne wartości pickerów na dzisiejszą datę, jeśli nie są już ustawione (np. po wczytaniu szkicu)
+# Zakres lat: od -5 do +5 względem bieżącego roku
+
+
+
+years = list(range(today.year - 5, today.year + 6))
+# Domyślne wartości tylko raz na starcie
 if 'year_picker' not in st.session_state:
     st.session_state['year_picker'] = today.year
 if 'month_picker' not in st.session_state:
     st.session_state['month_picker'] = polish_months[today.month - 1]
 if 'day_picker' not in st.session_state:
     st.session_state['day_picker'] = today.day
-# Zakres lat: od -5 do +5 względem bieżącego roku
-years = list(range(today.year - 5, today.year + 6))
-selected_year = col_year.selectbox("Rok", years, key="year_picker")
-selected_month_name = col_month.selectbox("Miesiąc", polish_months, key="month_picker")
+# Pobierz aktualne wartości z session_state
+selected_year = st.session_state['year_picker']
+selected_month_name = st.session_state['month_picker']
 month_idx = polish_months.index(selected_month_name) + 1
-# Dni zależą od miesiąca i roku (obsługa lutego/lat przestępnych)
 last_day = calendar.monthrange(selected_year, month_idx)[1]
 days = list(range(1, last_day + 1))
-selected_day = col_day.selectbox("Dzień", days, key="day_picker")
+# Jeśli wybrany dzień jest poza zakresem, ustaw na ostatni dostępny dzień
+if st.session_state['day_picker'] not in days:
+    st.session_state['day_picker'] = last_day
+selected_year_new = col_year.selectbox("Rok", years, index=years.index(selected_year))
+selected_month_name_new = col_month.selectbox("Miesiąc", polish_months, index=polish_months.index(selected_month_name))
+month_idx_new = polish_months.index(selected_month_name_new) + 1
+last_day_new = calendar.monthrange(selected_year_new, month_idx_new)[1]
+days_new = list(range(1, last_day_new + 1))
+selected_day_new = col_day.selectbox("Dzień", days_new, index=min(days_new.index(st.session_state['day_picker']), len(days_new)-1))
+# Aktualizuj session_state tylko jeśli użytkownik zmienił wybór
+if selected_year_new != st.session_state['year_picker']:
+    st.session_state['year_picker'] = selected_year_new
+if selected_month_name_new != st.session_state['month_picker']:
+    st.session_state['month_picker'] = selected_month_name_new
+if selected_day_new != st.session_state['day_picker']:
+    st.session_state['day_picker'] = selected_day_new
 # Zbuduj obiekt datetime na podstawie wyboru
 try:
     audit_date = datetime(selected_year, month_idx, selected_day)
@@ -537,6 +556,8 @@ if 'report_filename' not in st.session_state:
     st.session_state['report_filename'] = None
 
 if st.button("Generuj raport Word"):
+    # Wygeneruj rekomendacje AI przed budową raportu Word
+    recs = generate_recommendations(responses, notes, model_choice)
     # Walidacja: wymagalność notatki dla niespełnionych kryteriów
     missing_notes = []
     for crit in wcag_criteria:
@@ -545,28 +566,122 @@ if st.button("Generuj raport Word"):
     if missing_notes:
         st.warning(f"Dla wytycznych oznaczonych jako niespełnione wymagane jest uzupełnienie notatki: {', '.join(missing_notes)}")
     else:
+        # Funkcja czyszcząca rekomendacje AI
+        import re
+        def format_recommendation(rec):
+            # rec może być dict lub string
+            if not rec:
+                return ""
+            import re
+            # Funkcja czyszcząca tekst z multimediów i niedozwolonych linków
+            def strip_multimedia(text):
+                # Usuń tagi multimedialne
+                text = re.sub(r'<\s*(video|source|img|iframe|audio|embed)[^>]*>', '', text, flags=re.IGNORECASE)
+                # Usuń linki do wideo
+                text = re.sub(r'https?://[^\s]+(youtube|vimeo|\.mp4|\.webm|\.mov|\.avi|\.wmv|\.mkv)[^\s]*', '', text, flags=re.IGNORECASE)
+                # Usuń komunikaty o nieobsługiwanym wideo
+                text = re.sub(r'Nieobsługiwany format wideo|Nie można odtworzyć wideo|Brak podglądu', '', text, flags=re.IGNORECASE)
+                return text.strip()
+
+            if isinstance(rec, dict):
+                parts = []
+                # Numer kryterium lub nazwa (jeśli dostępna)
+                wcag_id = rec.get('id') or rec.get('nazwa')
+                if wcag_id:
+                    wcag_id = strip_multimedia(str(wcag_id))
+                    if wcag_id:
+                        parts.append(f"{wcag_id}")
+                # Rekomendacja
+                naprawa = rec.get('naprawa') or rec.get('rekomendacja')
+                if naprawa:
+                    naprawa = strip_multimedia(str(naprawa).strip().strip(':').strip('"'))
+                    if naprawa:
+                        parts.append(f"Rekomendacja: {naprawa}")
+                # Przykład poprawy
+                kod = rec.get('kod') or rec.get('przyklad')
+                if kod:
+                    kod = strip_multimedia(str(kod).strip().strip(':').strip('"'))
+                    if kod:
+                        parts.append(f"Przykład poprawy: {kod}")
+                # Źródło/W3C link
+                w3c_link = rec.get('w3c_link') or rec.get('źródło') or rec.get('zrodlo')
+                if w3c_link:
+                    w3c_link = strip_multimedia(str(w3c_link).strip().strip(':').strip('"'))
+                    if w3c_link:
+                        parts.append(f"Źródło: {w3c_link}")
+                # Usuń puste linie
+                return "\n".join([p for p in parts if p])
+            # Jeśli rec to string, wyczyść i wypisz jako rekomendację
+            clean = strip_multimedia(str(rec).strip().strip(':').strip('"'))
+            if clean:
+                return f"Rekomendacja: {clean}"
+            return ""
+
+        # Debug: pokaż rekomendacje w UI jeśli checkbox zaznaczony
+        if debug_show_recs and recs:
+            st.subheader("Rekomendacje AI (podgląd)")
+            def render_bold_recommendation(formatted, cid=None):
+                lines = formatted.split("\n")
+                html = ""
+                if cid:
+                    html += f"<b>{cid}</b><br>"
+                for line in lines:
+                    if line.startswith("Rekomendacja:"):
+                        html += f"<b>Rekomendacja:</b> {line[len('Rekomendacja:'):].lstrip()}<br>"
+                    elif line.startswith("Źródło:"):
+                        html += f"<br><b>Źródło:</b> {line[len('Źródło:'):].lstrip()}<br>"
+                    else:
+                        html += line + "<br>"
+                st.markdown(html, unsafe_allow_html=True)
+
+            if isinstance(recs, dict):
+                for cid, rec in recs.items():
+                    formatted = format_recommendation(rec)
+                    if formatted:
+                        render_bold_recommendation(formatted, cid)
+            else:
+                formatted = format_recommendation(recs)
+                if formatted:
+                    render_bold_recommendation(formatted)
+        from docx.shared import Pt, RGBColor, Cm
         doc = Document()
-        # Wyśrodkowany tytuł jako nagłówek (Heading 1), bez nawiasów kwadratowych
+        # Ustaw czcionkę globalnie na Calibri 11pt
+        style = doc.styles['Normal']
+        font = style.font
+        font.name = 'Calibri'
+        font.size = Pt(11)
+
+        # Tytuł główny
         if app_name:
-            title = f"Raport z audytu WCAG {app_name}"
+            title = f"Raport z audytu dostępności WCAG 2.1 - {app_name}"
         else:
-            title = "Raport z audytu WCAG"
-        # Tytuł jako zwykły paragraf, wyśrodkowany, pogrubiony, powiększony
+            title = "Raport z audytu dostępności WCAG 2.1"
         p = doc.add_paragraph()
         run = p.add_run(title)
         run.bold = True
-        run.font.size = doc.styles['Heading 1'].font.size
-        p.alignment = 1  # 0=left, 1=center, 2=right
-        # Dodaj odstęp po tytule
+        run.font.size = Pt(16)
+        p.alignment = 1  # center
+
+        # Podtytuł
+        if doc_type:
+            p2 = doc.add_paragraph()
+            run2 = p2.add_run(f"Typ audytowanego dokumentu: {doc_type}")
+            run2.italic = True
+            p2.alignment = 1
+
+        # Wprowadzenie
+        intro = doc.add_paragraph()
+        intro.add_run("Niniejszy raport przedstawia wyniki audytu dostępności cyfrowej zgodnie z wytycznymi WCAG 2.1. Celem audytu jest wskazanie mocnych stron oraz obszarów wymagających poprawy, aby zapewnić pełną dostępność dla wszystkich użytkowników. Poniżej przedstawiono szczegółowe rekomendacje oraz status spełnienia poszczególnych kryteriów.")
         doc.add_paragraph("")
-        # Wyboldowane metadane
+
+        # Metadane
         meta_items = [
-            ("Data audytu", formatted),
+            ("Data audytu", format_polish_date(audit_date)),
             ("Autor audytu", audit_author),
             ("Wersja dokumentu", doc_version),
             ("Nazwa aplikacji / dokumentu", app_name),
-            ("Typ audytowanego dokumentu", doc_type),
-            ("Wersja przeglądarki", browser_version)
+            ("Wersja przeglądarki", browser_version),
+            ("Zakres testu", tested_scope.replace('\n', ', '))
         ]
         for label, value in meta_items:
             if value:
@@ -574,64 +689,77 @@ if st.button("Generuj raport Word"):
                 run_label = para.add_run(f"{label}: ")
                 run_label.bold = True
                 para.add_run(str(value))
-        if tested_scope:
-            para = doc.add_paragraph()
-            run_label = para.add_run("Zakres testu:")
-            run_label.bold = True
-            for line in [l.strip() for l in tested_scope.splitlines() if l.strip()]:
-                doc.add_paragraph(f"- {line}")
         doc.add_paragraph("")
-        from docx.shared import Inches, Cm
-        table = doc.add_table(rows=1, cols=5)
+
+        # Tabela rekomendacji
+        table = doc.add_table(rows=1, cols=4)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
-        headers = ['ID', 'Nazwa wytycznej', 'Status', 'Notatka', 'Załączniki']
+        headers = ['ID / Nazwa', 'Opis', 'Status', 'Uwagi']
         for i, h in enumerate(headers):
             hdr_cells[i].text = h
             for paragraph in hdr_cells[i].paragraphs:
                 for run in paragraph.runs:
                     run.bold = True
-        # Wymuś minimalną szerokość kolumny ID (1 cm) na wszystkich komórkach tej kolumny
+        # Ustaw szerokości kolumn
         try:
-            for row in table.rows:
-                cell = row.cells[0]
-                cell.width = Cm(1)
+            hdr_cells[0].width = Cm(2)
+            hdr_cells[1].width = Cm(7)
+            hdr_cells[2].width = Cm(3)
+            hdr_cells[3].width = Cm(5)
         except Exception:
             pass
+
+        # Kolory statusów
+        status_colors = {
+            "Spełnione": RGBColor(198, 239, 206),   # jasny zielony
+            "Niespełnione": RGBColor(255, 199, 206), # jasny czerwony
+            "Nie dotyczy": RGBColor(255, 235, 156)   # pastelowy żółty
+        }
+
         for crit in wcag_criteria:
             row_cells = table.add_row().cells
-            row_cells[0].text = crit["id"]
-            row_cells[1].text = crit["description"]
-            row_cells[2].text = responses[crit["id"]]
-            row_cells[3].text = notes.get(crit["id"], "")
-            imgs = uploads.get(crit["id"]) or []
-            if imgs:
-                temp_files = [] if 'temp_files' not in locals() else temp_files
-                for up in imgs:
-                    try:
-                        suffix = os.path.splitext(up.name)[1] if hasattr(up, "name") else ".png"
-                        tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-                        tf.write(up.getbuffer())
-                        tf.close()
-                        temp_files.append(tf.name)
-                        paragraph = row_cells[4].add_paragraph()
-                        run = paragraph.add_run()
-                        run.add_picture(tf.name, width=Inches(1.5))
-                    except Exception:
-                        row_cells[4].add_paragraph(f"(Błąd przy dodawaniu obrazka {up.name})")
-            else:
-                row_cells[4].text = ""
-        # Po utworzeniu całej tabeli wymuś szerokość kolumny ID na 0.8 cm
-        try:
-            for row in table.rows:
-                row.cells[0].width = Cm(0.8)
-        except Exception:
-            pass
-        # Dodaj sekcję rekomendacji na końcu
+            # ID / Nazwa
+            row_cells[0].text = f"{crit['id']} / {crit['description']}"
+            # Opis
+            row_cells[1].text = crit.get('long_description', crit['description'])
+            # Status
+            status = responses[crit['id']]
+            status_txt = status.replace('✅ ', '').replace('❌ ', '').replace('⚠️ ', '')
+            row_cells[2].text = status_txt
+            # Kolor tła komórki statusu (poprawnie przez XML)
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+            color_map = {
+                "Spełnione": "C6EFCE",   # jasny zielony
+                "Niespełnione": "FFC7CE", # jasny czerwony
+                "Nie dotyczy": "FFEB9C"   # pastelowy żółty
+            }
+            fillcolor = color_map.get(status_txt, "FFFFFF")
+            tc = row_cells[2]._tc
+            tcPr = tc.get_or_add_tcPr()
+            tcPr.append(parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fillcolor}"/>'))
+            # Uwagi
+            note = notes.get(crit['id'], "")
+            row_cells[3].text = note
+            # Czcionka w całym wierszu
+            for cell in row_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.name = 'Calibri'
+                        run.font.size = Pt(11)
+            # Wyrównanie tekstu do lewej
+            for cell in row_cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.alignment = 0
+
+        # Odstęp po tabeli
+        doc.add_paragraph("")
+        # Dodaj sekcję rekomendacji AI na końcu
         doc.add_page_break()
-        doc.add_heading("Rekomendacje AI dla niespełnionych kryteriów", level=2)
-        # Jeśli są rekomendacje, dodaj je
-        if 'recs' in locals() and recs:
+        # Dodaj sekcję rekomendacji AI tylko jeśli recs istnieje i nie jest None
+        if 'recs' in locals() and recs is not None:
+            doc.add_heading("Rekomendacje AI dla niespełnionych kryteriów", level=2)
             for crit in wcag_criteria:
                 cid = crit["id"]
                 rec = None
@@ -639,19 +767,24 @@ if st.button("Generuj raport Word"):
                     rec = recs.get(cid) or recs.get("_combined")
                 else:
                     rec = None
-                if rec:
+                formatted = format_recommendation(rec)
+                if formatted:
                     doc.add_heading(f"{cid} - {crit['description']}", level=3)
-                    doc.add_paragraph("Rekomendacja:")
-                    for l in str(rec).splitlines():
-                        l = l.strip()
-                        if l:
-                            if l.startswith("-") or l.startswith("•") or l[:2].isdigit():
-                                for sub in l.split("- "):
-                                    sub = sub.strip()
-                                    if sub:
-                                        doc.add_paragraph(sub)
-                            else:
-                                doc.add_paragraph(l)
+                    # Lepsze formatowanie: osobne akapity dla etykiet i treści
+                    lines = formatted.split("\n")
+                    for line in lines:
+                        if line.startswith("Rekomendacja:"):
+                            para_label = doc.add_paragraph()
+                            run_label = para_label.add_run("Rekomendacja:")
+                            run_label.bold = True
+                            para_text = doc.add_paragraph(line[len("Rekomendacja:"):].lstrip())
+                        elif line.startswith("Źródło:"):
+                            para_label = doc.add_paragraph()
+                            run_label = para_label.add_run("Źródło:")
+                            run_label.bold = True
+                            para_text = doc.add_paragraph(line[len("Źródło:"):].lstrip())
+                        else:
+                            doc.add_paragraph(line)
         # ... rekomendacje AI i dalsza logika ...
         # Zapis dokumentu
         def _slugify(name: str) -> str:
@@ -701,95 +834,36 @@ if st.session_state.get('report_ready') and st.session_state.get('report_filenam
         with open(st.session_state['report_filename'], "rb") as f:
             data = f.read()
             filesize = len(data)
-            st.download_button("Pobierz raport", data=data, file_name=st.session_state['report_filename'], mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            st.download_button("Pobierz raport (Word)", data=data, file_name=st.session_state['report_filename'], mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="download_word")
         st.success(f"Raport wygenerowany: {st.session_state['report_filename']} ({filesize} bajtów)")
+        # Automatyczna konwersja do PDF
+        try:
+            from docx2pdf import convert
+            pdf_name = st.session_state['report_filename'].replace('.docx', '.pdf')
+            convert(st.session_state['report_filename'], pdf_name)
+            import os
+            if os.path.exists(pdf_name) and os.path.getsize(pdf_name) > 0:
+                with open(pdf_name, "rb") as fpdf:
+                    st.download_button("Pobierz raport (PDF)", data=fpdf.read(), file_name=pdf_name, mime="application/pdf", key="download_pdf")
+                st.success(f"Raport PDF zapisany: {pdf_name}")
+            else:
+                st.error(f"Nie udało się wygenerować PDF: plik nie powstał lub jest pusty.")
+        except ImportError:
+            st.warning("Aby eksportować do PDF, zainstaluj pakiet docx2pdf: pip install docx2pdf")
+        except Exception as e:
+            import os
+            pdf_name = st.session_state['report_filename'].replace('.docx', '.pdf')
+            if os.path.exists(pdf_name) and os.path.getsize(pdf_name) > 0:
+                with open(pdf_name, "rb") as fpdf:
+                    st.download_button("Pobierz raport (PDF)", data=fpdf.read(), file_name=pdf_name, mime="application/pdf", key="download_pdf")
+                st.success(f"Raport PDF zapisany: {pdf_name}")
+                # Nie pokazuj ostrzeżenia jeśli PDF jest poprawny
+            else:
+                st.error(f"Nie udało się wygenerować PDF: {e}")
     except Exception as e:
         st.error(f"Utworzono plik, ale nie udało się przygotować przycisku pobierania: {e}")
-        api_key = os.getenv("OPENAI_API_KEY")
-        # Build notes_for_ai: include notes and indication of screenshots
-        notes_for_ai = {}
-        for cid in responses.keys():
-            note = notes.get(cid, "")
-            # Do AI przekazuj tylko tekstową notatkę, bez nazw plików
-            notes_for_ai[cid] = note
 
-        # If model_choice is MOCK, do not require API key
-        if model_choice == "MOCK" or api_key:
-            with st.spinner("Generuję rekomendacje..."):
-                recs = generate_recommendations(responses, notes=notes_for_ai, model=model_choice)
-
-            # Preview in UI
-            if debug_show_recs and recs:
-                st.subheader("Podgląd wygenerowanych rekomendacji")
-                try:
-                    st.json(recs)
-                except Exception:
-                    st.write(recs)
-
-            if model_choice != "MOCK":
-                st.info(f"Użyty model: {model_choice} — pamiętaj, że wywołania do OpenAI są płatne.")
-        else:
-            st.warning("Brak ustawionego OPENAI_API_KEY — ustaw zmienną środowiskową lub wybierz tryb MOCK.")
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        st.error(f"Błąd podczas generowania rekomendacji: {e}")
-        st.code(tb)
-
-    # Dodajemy do dokumentu osobne sekcje dla każdej wytycznej (nagłówek + status + uwagi + screenshoty + rekomendacja)
-    # Sekcja rekomendacji (po tabeli)
-    doc.add_heading("Rekomendacje AI dla niespełnionych kryteriów", level=2)
-    for crit in wcag_criteria:
-        cid = crit["id"]
-        rec = None
-        if isinstance(recs, dict):
-            rec = recs.get(cid) or recs.get("_combined")
-        else:
-            rec = None
-        if rec:
-            doc.add_heading(f"{cid} - {crit['description']}", level=3)
-            doc.add_paragraph("Rekomendacja:")
-            # Formatowanie: każdy punkt/myślnik/liczba od nowej linii
-            lines = []
-            for l in str(rec).splitlines():
-                l = l.strip()
-                if l:
-                    # Rozbij na podpunkty jeśli są
-                    if l.startswith("-") or l.startswith("•") or l[:2].isdigit():
-                        for sub in l.split("- "):
-                            sub = sub.strip()
-                            if sub:
-                                doc.add_paragraph(sub)
-                    else:
-                        doc.add_paragraph(l)
-
-    # Zapis dokumentu
-    # Przygotuj przyjazną nazwę pliku bazującą na nazwie aplikacji (jeśli podana)
-    def _slugify(name: str) -> str:
-        # proste slugify: usuń niealfanumeryczne, zamień spacje na podkreślenia
-        import re
-        s = name.strip().lower()
-        s = re.sub(r"[^a-z0-9]+", "_", s)
-        s = re.sub(r"_+", "_", s).strip("_")
-        return s or "report"
-
-    date_str = datetime.today().strftime('%Y-%m-%d')
-    if app_name:
-        safe = _slugify(app_name)
-        filename = f"Raport_WCAG_{safe}_{date_str}.docx"
-    else:
-        filename = f"Raport_WCAG_{date_str}.docx"
-    doc.save(filename)
-    # pokaż informację w UI i udostępnij rzeczywisty plik do pobrania
-    try:
-        filesize = None
-        with open(filename, "rb") as f:
-            data = f.read()
-            filesize = len(data)
-            st.download_button("Pobierz raport", data=data, file_name=filename, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-        st.success(f"Raport wygenerowany: {filename} ({filesize} bajtów)")
-    except Exception as e:
-        st.error(f"Utworzono plik, ale nie udało się przygotować przycisku pobierania: {e}")
+    # (zapis pliku Word odbywa się wyłącznie podczas generowania raportu, nie powielaj tutaj)
 
     # cleanup temp image files
     try:
@@ -802,7 +876,6 @@ if st.session_state.get('report_ready') and st.session_state.get('report_filenam
     # Zapisz metadane do Excela
     meta = {
         "Data audytu": audit_date.strftime('%Y-%m-%d'),
-        "Data audytu (czytelna)": formatted,
         "Autor audytu": audit_author,
         "Wersja dokumentu": doc_version,
         "Nazwa aplikacji / dokumentu": app_name,
@@ -813,7 +886,7 @@ if st.session_state.get('report_ready') and st.session_state.get('report_filenam
 
     import pandas as pd
     meta_df = pd.DataFrame([meta])
-    xlsx_name = filename.replace('.docx', '.xlsx')
+    xlsx_name = st.session_state['report_filename'].replace('.docx', '.xlsx')
     meta_df.to_excel(xlsx_name, index=False)
     try:
         with open(xlsx_name, "rb") as f:
@@ -834,6 +907,7 @@ if st.session_state.get('report_ready') and st.session_state.get('report_filenam
                 "responses": responses,
                 "notes": notes
             }
+            date_str = datetime.today().strftime('%Y-%m-%d')
             safe = app_name.strip().lower().replace(" ", "_") or "szkic"
             draft_name = f"{safe}_{date_str}.json"
             draft_path = os.path.join(draft_dir, draft_name)
