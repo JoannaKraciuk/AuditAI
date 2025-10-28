@@ -1,7 +1,19 @@
 import os
-import openai
 import importlib
 import json
+import logging
+
+# Defensive import: avoid ModuleNotFoundError at import time (Streamlit Cloud may not
+# have the `openai` package installed until dependencies are resolved). We set a
+# flag `OPENAI_AVAILABLE` so callers can gracefully fall back to MOCK behavior.
+try:
+    import openai  # type: ignore
+    OPENAI_AVAILABLE = True
+except Exception:
+    openai = None  # type: ignore
+    OPENAI_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 # Some openai package versions expose exceptions under openai.error, others may differ.
 # Use importlib to attempt dynamic import and fallback to local exceptions if not found.
@@ -26,8 +38,10 @@ def generate_recommendations(responses: dict, notes: dict | None = None, model: 
     Returns a dict mapping criterion id to recommendation string.
     """
     api_key = os.getenv("OPENAI_API_KEY")
-    # If user chooses MOCK model or API key missing, return example text instead of calling API
-    if model == "MOCK" or not api_key:
+    # If user chooses MOCK model, API key missing, or openai package unavailable,
+    # return example text instead of calling API. This prevents startup crashes on
+    # platforms where `openai` isn't installed yet.
+    if model == "MOCK" or not api_key or not OPENAI_AVAILABLE:
         # Simple mock response useful for offline/dev testing
         failed = [cid for cid, r in responses.items() if r and str(r).startswith("❌")]
         if not failed:
@@ -35,7 +49,15 @@ def generate_recommendations(responses: dict, notes: dict | None = None, model: 
         # return dict mapping criterion id -> sample recommendation
         return {cid: f"Przykładowe rekomendacje dla {cid}: sprawdź ALT, kontrast i obsługę klawiatury." for cid in failed}
 
-    openai.api_key = api_key
+    # At this point openai should be importable; if not, we already returned above.
+    try:
+        openai.api_key = api_key
+    except Exception:
+        logger.exception("Failed to set openai.api_key - falling back to MOCK responses")
+        failed = [cid for cid, r in responses.items() if r and str(r).startswith("❌")]
+        if not failed:
+            return {}
+        return {cid: f"Przykładowe rekomendacje dla {cid}: sprawdź ALT, kontrast i obsługę klawiatury." for cid in failed}
 
     # Build a concise prompt listing unmet criteria
     failed = [cid for cid, r in responses.items() if r and str(r).startswith("❌")]
@@ -134,5 +156,8 @@ def generate_recommendations(responses: dict, notes: dict | None = None, model: 
         except Exception:
             return {"_combined": text}
 
-    # If we reach this point, the installed openai package doesn't expose a usable API
-    raise RuntimeError("Zainstalowana paczka openai nie obsługuje ani nowego, ani starego interfejsu klienta. Zainstaluj odpowiednią wersję (np. openai>=1.0.0) lub sprawdź dokumentację.")
+    # If we reach this point, the installed openai package doesn't expose a usable API.
+    # Instead of crashing the whole app, return a helpful mock/placeholder so the
+    # report generation can still proceed and user sees a descriptive message.
+    logger.warning("Zainstalowana paczka openai nie obsługuje rozpoznanego interfejsu klienta; zwracam złączony tekst jako '_combined'.")
+    return {"_combined": "Błąd wewnętrzny klienta OpenAI: nieobsługiwany interfejs biblioteki openai. Zainstaluj odpowiednią wersję lub ustaw model=MOCK."}

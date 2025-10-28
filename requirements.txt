@@ -4,3 +4,7 @@ openai>=0.27.0
 python-dotenv>=1.0
 pandas>=1.0
 Babel>=2.0
+
+# Optional runtime deps used by the app (ensure Streamlit Cloud installs them)
+reportlab>=4.0
+openpyxl>=3.0
